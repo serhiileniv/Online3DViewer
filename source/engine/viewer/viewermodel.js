@@ -1,5 +1,5 @@
 import { RGBColor } from '../model/color.js';
-import { ConvertColorToThreeColor, DisposeThreeObjects, GetLineSegmentsProjectedDistance } from '../threejs/threeutils.js';
+import { BuildThreeMeshBoundsTree, ConvertColorToThreeColor, DisposeThreeObjects, GetLineSegmentsProjectedDistance } from '../threejs/threeutils.js';
 
 import * as THREE from 'three';
 
@@ -139,6 +139,7 @@ export class ViewerMainModel
         this.edgeSettings = new EdgeSettings (false, new RGBColor (0, 0, 0), 1);
         this.hasLines = false;
         this.hasPolygonOffset = false;
+        this.hasBoundsTrees = false;
     }
 
     SetMainObject (mainObject)
@@ -146,6 +147,7 @@ export class ViewerMainModel
         this.mainModel.SetRootObject (mainObject);
         this.hasLines = false;
         this.hasPolygonOffset = false;
+        this.hasBoundsTrees = false;
 
         this.EnumerateLines ((line) => {
             this.hasLines = true;
@@ -308,6 +310,19 @@ export class ViewerMainModel
         }
     }
 
+    BuildBoundsTrees ()
+    {
+        // Built on the first pick, so loading a model that is never clicked does not pay for it.
+        // Rigid transforms need no rebuild because the ray goes to local space.
+        if (this.hasBoundsTrees) {
+            return;
+        }
+        this.EnumerateMeshes ((mesh) => {
+            BuildThreeMeshBoundsTree (mesh);
+        });
+        this.hasBoundsTrees = true;
+    }
+
     GetMeshIntersectionUnderMouse (intersectionMode, mouseCoords, camera, width, height)
     {
         if (this.mainModel.IsEmpty ()) {
@@ -322,9 +337,13 @@ export class ViewerMainModel
         mousePos.x = (mouseCoords.x / width) * 2 - 1;
         mousePos.y = -(mouseCoords.y / height) * 2 + 1;
 
+        this.BuildBoundsTrees ();
         let raycaster = new THREE.Raycaster ();
         raycaster.setFromCamera (mousePos, camera);
         raycaster.params.Line.threshold = 10.0;
+        // Only the nearest hit of each mesh is needed. Visibility is decided per object,
+        // so the nearest hit of the nearest visible mesh is still found. Lines ignore it.
+        raycaster.firstHitOnly = true;
 
         let iSectObjects = raycaster.intersectObject (this.mainModel.GetRootObject (), true);
         for (let i = 0; i < iSectObjects.length; i++) {
